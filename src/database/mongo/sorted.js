@@ -32,90 +32,97 @@ module.exports = function (module) {
 	};
 
 	async function getSortedSetRange(key, start, stop, min, max, sort, withScores) {
-		if (!key) {
-			return;
-		}
-		const isArray = Array.isArray(key);
-		if ((start < 0 && start > stop) || (isArray && !key.length)) {
+		if (!key || (Array.isArray(key) && !key.length)) {
 			return [];
 		}
-		const query = { _key: key };
-		if (isArray) {
-			if (key.length > 1) {
-				query._key = { $in: key };
-			} else {
-				query._key = key[0];
-			}
-		}
 
-		if (min !== '-inf') {
-			query.score = { $gte: parseFloat(min) };
-		}
-		if (max !== '+inf') {
-			query.score = query.score || {};
-			query.score.$lte = parseFloat(max);
+		const query = buildQuery(key, min, max);
+		const fields = buildFields(withScores);
+		const { adjustedStart, adjustedStop, limit, reverse } = adjustRangeParams(start, stop);
+
+		let result = await executeQuery(query, fields, adjustedStart, limit, sort);
+
+		result = postProcessResults(result, reverse, withScores);
+
+		return result;
+	}
+
+	function buildQuery(key, min, max) {
+		const query = { _key: Array.isArray(key) ? (key.length > 1 ? { $in: key } : key[0]) : key };
+		
+		if (min !== '-inf' || max !== '+inf') {
+			query.score = {};
+			if (min !== '-inf') query.score.$gte = parseFloat(min);
+			if (max !== '+inf') query.score.$lte = parseFloat(max);
 		}
 
 		if (max === min) {
 			query.score = parseFloat(max);
 		}
 
+		return query;
+	}
+
+	function buildFields(withScores) {
 		const fields = { _id: 0, _key: 0 };
 		if (!withScores) {
 			fields.score = 0;
 		}
+		return fields;
+	}
 
+	function adjustRangeParams(start, stop) {
 		let reverse = false;
+		let adjustedStart = start;
+		let adjustedStop = stop;
+
 		if (start === 0 && stop < -1) {
 			reverse = true;
-			sort *= -1;
-			start = Math.abs(stop + 1);
-			stop = -1;
+			adjustedStart = Math.abs(stop + 1);
+			adjustedStop = -1;
 		} else if (start < 0 && stop > start) {
-			const tmp1 = Math.abs(stop + 1);
-			stop = Math.abs(start + 1);
-			start = tmp1;
+			adjustedStart = Math.abs(stop + 1);
+			adjustedStop = Math.abs(start + 1);
 		}
 
-		let limit = stop - start + 1;
-		if (limit <= 0) {
-			limit = 0;
+		const limit = Math.max(adjustedStop - adjustedStart + 1, 0);
+
+		return { adjustedStart, adjustedStop, limit, reverse };
+	}
+
+	async function executeQuery(query, fields, skip, limit, sort) {
+		if (Array.isArray(query._key) && query._key.length > 100) {
+			return await executeBatchQuery(query, fields, skip, limit, sort);
 		}
 
-		let result = [];
-		async function doQuery(_key, fields, skip, limit) {
-			return await module.client.collection('objects').find({
-				...query, ...{ _key: _key },
-			}, { projection: fields })
+		return await module.client.collection('objects').find(query, { projection: fields })
+			.sort({ score: sort })
+			.skip(skip)
+			.limit(limit)
+			.toArray();
+	}
+
+	async function executeBatchQuery(query, fields, skip, limit, sort) {
+		const batches = [];
+		const batch = require('../../batch');
+		const batchSize = Math.ceil(query._key.length / Math.ceil(query._key.length / 100));
+		await batch.processArray(query._key, async currentBatch => batches.push(currentBatch), { batch: batchSize });
+		const batchData = await Promise.all(batches.map(
+			batch => module.client.collection('objects').find({ ...query, _key: { $in: batch } }, { projection: fields })
 				.sort({ score: sort })
-				.skip(skip)
 				.limit(limit)
-				.toArray();
-		}
+				.toArray()
+		));
+		return dbHelpers.mergeBatch(batchData, skip, limit - 1, sort);
+	}
 
-		if (isArray && key.length > 100) {
-			const batches = [];
-			const batch = require('../../batch');
-			const batchSize = Math.ceil(key.length / Math.ceil(key.length / 100));
-			await batch.processArray(key, async currentBatch => batches.push(currentBatch), { batch: batchSize });
-			const batchData = await Promise.all(batches.map(
-				batch => doQuery({ $in: batch }, { _id: 0, _key: 0 }, 0, stop + 1)
-			));
-			result = dbHelpers.mergeBatch(batchData, 0, stop, sort);
-			if (start > 0) {
-				result = result.slice(start, stop !== -1 ? stop + 1 : undefined);
-			}
-		} else {
-			result = await doQuery(query._key, fields, start, limit);
-		}
-
+	function postProcessResults(result, reverse, withScores) {
 		if (reverse) {
 			result.reverse();
 		}
 		if (!withScores) {
 			result = result.map(item => item.value);
 		}
-
 		return result;
 	}
 
