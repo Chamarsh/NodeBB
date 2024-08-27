@@ -38,7 +38,7 @@ module.exports = function (module) {
 
 		const query = buildQuery(key, min, max);
 		const fields = buildFields(withScores);
-		const { adjustedStart, adjustedStop, limit, reverse } = adjustRangeParams(start, stop);
+		const { adjustedStart, limit, reverse } = adjustRangeParams(start, stop);
 
 		let result = await executeQuery(query, fields, adjustedStart, limit, sort);
 
@@ -48,8 +48,14 @@ module.exports = function (module) {
 	}
 
 	function buildQuery(key, min, max) {
-		const query = { _key: Array.isArray(key) ? (key.length > 1 ? { $in: key } : key[0]) : key };
-		
+		const query = { _key: key };
+		if (Array.isArray(key)) {
+			if (key.length > 1) {
+				query._key = { $in: key };
+			} else {
+				query._key = key[0];
+			}
+		}
 		if (min !== '-inf' || max !== '+inf') {
 			query.score = {};
 			if (min !== '-inf') query.score.$gte = parseFloat(min);
