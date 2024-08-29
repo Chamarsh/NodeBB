@@ -36,11 +36,13 @@ privsTopics.get = async function (tid, uid) {
 	const deletable = isAdminOrMod || (privData['topics:delete'] && isOwner);
 	const mayReply = privsTopics.canViewDeletedScheduled(topicData, {}, false, privData['topics:schedule']);
 
-	const basePrivileges = getBasePrivileges(privData, topicData, isOwner, isModerator, isAdministrator, mayReply);
+	const topicPrivileges = getTopicPrivileges(privData, topicData, isOwner, isModerator, isAdministrator, mayReply);
+	const postPrivileges = getPostPrivileges(privData, topicData, isModerator, isAdministrator);
 	const additionalPrivileges = getAdditionalPrivileges(editable, deletable, isAdminOrMod, isOwner, privData);
 
 	return await plugins.hooks.fire('filter:privileges.topics.get', {
-		...basePrivileges,
+		...topicPrivileges,
+		...postPrivileges,
 		...additionalPrivileges,
 		disabled: disabled,
 		tid: tid,
@@ -48,13 +50,20 @@ privsTopics.get = async function (tid, uid) {
 	});
 };
 
-function getBasePrivileges(privData, topicData, isOwner, isModerator, isAdministrator, mayReply) {
+function getTopicPrivileges(privData, topicData, isOwner, isModerator, isAdministrator, mayReply) {
 	return {
 		'topics:reply': (privData['topics:reply'] && ((!topicData.locked && mayReply) || isModerator)) || isAdministrator,
 		'topics:read': privData['topics:read'] || isAdministrator,
 		'topics:schedule': privData['topics:schedule'] || isAdministrator,
 		'topics:tag': privData['topics:tag'] || isAdministrator,
 		'topics:delete': (privData['topics:delete'] && (isOwner || isModerator)) || isAdministrator,
+		read: privData.read || isAdministrator,
+		purge: (privData.purge && (isOwner || isModerator)) || isAdministrator,
+	};
+}
+
+function getPostPrivileges(privData, topicData, isModerator, isAdministrator) {
+	return {
 		'posts:edit': (privData['posts:edit'] && (!topicData.locked || isModerator)) || isAdministrator,
 		'posts:history': privData['posts:history'] || isAdministrator,
 		'posts:upvote': privData['posts:upvote'] || isAdministrator,
@@ -66,8 +75,6 @@ function getBasePrivileges(privData, topicData, isOwner, isModerator, isAdminist
 
 function getAdditionalPrivileges(editable, deletable, isAdminOrMod, isOwner, privData) {
 	return {
-		read: privData.read || isAdministrator,
-		purge: (privData.purge && (isOwner || isModerator)) || isAdministrator,
 		view_thread_tools: editable || deletable,
 		editable: editable,
 		deletable: deletable,
