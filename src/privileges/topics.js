@@ -33,10 +33,23 @@ privsTopics.get = async function (tid, uid) {
 	const isOwner = uid > 0 && uid === topicData.uid;
 	const isAdminOrMod = isAdministrator || isModerator;
 	const editable = isAdminOrMod;
-	const deletable = (privData['topics:delete'] && (isOwner || isModerator)) || isAdministrator;
+	const deletable = isAdminOrMod || (privData['topics:delete'] && isOwner);
 	const mayReply = privsTopics.canViewDeletedScheduled(topicData, {}, false, privData['topics:schedule']);
 
+	const basePrivileges = getBasePrivileges(privData, topicData, isOwner, isModerator, isAdministrator, mayReply);
+	const additionalPrivileges = getAdditionalPrivileges(editable, deletable, isAdminOrMod, isOwner, privData);
+
 	return await plugins.hooks.fire('filter:privileges.topics.get', {
+		...basePrivileges,
+		...additionalPrivileges,
+		disabled: disabled,
+		tid: tid,
+		uid: uid,
+	});
+};
+
+function getBasePrivileges(privData, topicData, isOwner, isModerator, isAdministrator, mayReply) {
+	return {
 		'topics:reply': (privData['topics:reply'] && ((!topicData.locked && mayReply) || isModerator)) || isAdministrator,
 		'topics:read': privData['topics:read'] || isAdministrator,
 		'topics:schedule': privData['topics:schedule'] || isAdministrator,
@@ -50,18 +63,19 @@ privsTopics.get = async function (tid, uid) {
 		'posts:view_deleted': privData['posts:view_deleted'] || isAdministrator,
 		read: privData.read || isAdministrator,
 		purge: (privData.purge && (isOwner || isModerator)) || isAdministrator,
+	};
+}
 
+function getAdditionalPrivileges(editable, deletable, isAdminOrMod, isOwner, privData) {
+	return {
 		view_thread_tools: editable || deletable,
 		editable: editable,
 		deletable: deletable,
 		view_deleted: isAdminOrMod || isOwner || privData['posts:view_deleted'],
-		view_scheduled: privData['topics:schedule'] || isAdministrator,
+		view_scheduled: privData['topics:schedule'] || isAdminOrMod,
 		isAdminOrMod: isAdminOrMod,
-		disabled: disabled,
-		tid: tid,
-		uid: uid,
-	});
-};
+	};
+}
 
 privsTopics.can = async function (privilege, tid, uid) {
 	const cid = await topics.getTopicField(tid, 'cid');
