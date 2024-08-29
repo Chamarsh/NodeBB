@@ -61,13 +61,13 @@ function getBasePrivileges(privData, topicData, isOwner, isModerator, isAdminist
 		'posts:downvote': privData['posts:downvote'] || isAdministrator,
 		'posts:delete': (privData['posts:delete'] && (!topicData.locked || isModerator)) || isAdministrator,
 		'posts:view_deleted': privData['posts:view_deleted'] || isAdministrator,
-		read: privData.read || isAdministrator,
-		purge: (privData.purge && (isOwner || isModerator)) || isAdministrator,
 	};
 }
 
 function getAdditionalPrivileges(editable, deletable, isAdminOrMod, isOwner, privData) {
 	return {
+		read: privData.read || isAdministrator,
+		purge: (privData.purge && (isOwner || isModerator)) || isAdministrator,
 		view_thread_tools: editable || deletable,
 		editable: editable,
 		deletable: deletable,
